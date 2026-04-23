@@ -1,319 +1,348 @@
 'use strict';
 
 var STORAGE_KEY = 'tracker-state-v1';
+var STATE_VERSION = 2;
+var FIXED_TABS = [
+    { id: 'currency', name: 'Currency', subcategories: [] },
+    { id: 'upgrade-materials', name: 'Upgrade Materials', subcategories: [] },
+    { id: 'account-warehouse', name: 'Account Warehouse', subcategories: [] },
+    { id: 'crafting-materials', name: 'Crafting Materials', subcategories: [] },
+    { id: 'apsharanta', name: 'Apsharanta', subcategories: ['heavenly', 'sundew', 'nightshade', 'ancient'] },
+    { id: 'daeva-pass', name: 'Daeva Pass', subcategories: [] },
+    { id: 'instances', name: 'Instances', subcategories: ['group-hard-normal', 'group-easy-normal', 'solo'] }
+];
 
-// Global state
 var trackerState = {};
-var tabs = ['ducat']; // Ducat is default and always first
-var activeTab = 'ducat';
+var tabs = [];
+var activeTab = 'currency';
 var nextTabId = 1;
 
-// Initialize default character data for ducat
-function createDefaultCharacterData(charId, charName) {
-    var data = { id: charId, name: charName, classKey: 'gladiator', runs: {}, totalDucats: 0 };
-    DUCAT_INSTANCES.forEach(function(inst) {
-        data.runs[inst.id] = 0;
+function getDefaultRunsMap() {
+    var runs = {};
+    getDucatInstances().forEach(function(inst) {
+        runs[inst.id] = 0;
     });
-    return data;
+    return runs;
 }
 
-// Initialize default ducat tab data with characters
-function createDefaultDucatData() {
-    var data = {
-        id: 'ducat',
-        name: 'Ducat',
-        isDefault: true,
-        characters: {},
-        activeCharacterId: 'char-1',
-        nextCharId: 2
+function getDucatInstances() {
+    if (typeof DUCAT_INSTANCES !== 'undefined' && Array.isArray(DUCAT_INSTANCES)) return DUCAT_INSTANCES;
+    if (typeof INSTANCE_GROUPS !== 'undefined' && INSTANCE_GROUPS) {
+        var hard = Array.isArray(INSTANCE_GROUPS.groupHardNormal) ? INSTANCE_GROUPS.groupHardNormal : [];
+        var easy = Array.isArray(INSTANCE_GROUPS.groupEasyNormal) ? INSTANCE_GROUPS.groupEasyNormal : [];
+        return hard.concat(easy);
+    }
+    return [];
+}
+
+function createDefaultCharacter(charId, charName) {
+    return { id: charId, name: charName, classKey: 'gladiator' };
+}
+
+function createDefaultCoreState() {
+    var charId = 'char-1';
+    return {
+        version: STATE_VERSION,
+        characters: {
+            byId: {
+                'char-1': createDefaultCharacter(charId, 'Character 1')
+            },
+            order: [charId],
+            activeCharacterId: charId,
+            nextCharId: 2
+        },
+        ducat: {
+            byCharacter: {
+                'char-1': {
+                    runs: getDefaultRunsMap(),
+                    totalDucats: 0
+                }
+            }
+        },
+        tabSelections: {
+            apsharanta: '',
+            instances: ''
+        },
+        customTabs: {},
+        fixedTabDataByCharacter: {}
     };
-    // Create first default character
-    data.characters['char-1'] = createDefaultCharacterData('char-1', 'Character 1');
-    return data;
 }
 
-// Initialize custom tab data (empty)
-function createCustomTab(id, name) {
-    return { id: id, name: name, isDefault: false, fields: [] };
+function getFixedTabById(tabId) {
+    return FIXED_TABS.find(function(tab) { return tab.id === tabId; }) || null;
 }
 
-// Save state to localStorage
+function rebuildTabsList() {
+    tabs = FIXED_TABS.map(function(tab) { return tab.id; });
+    Object.keys(trackerState.customTabs || {}).forEach(function(tabId) {
+        tabs.push(tabId);
+    });
+}
+
+function ensureCharacterDucatData(charId) {
+    if (!trackerState.ducat.byCharacter[charId]) {
+        trackerState.ducat.byCharacter[charId] = {
+            runs: getDefaultRunsMap(),
+            totalDucats: 0
+        };
+    }
+    if (!trackerState.ducat.byCharacter[charId].runs) {
+        trackerState.ducat.byCharacter[charId].runs = getDefaultRunsMap();
+    }
+    getDucatInstances().forEach(function(inst) {
+        if (typeof trackerState.ducat.byCharacter[charId].runs[inst.id] !== 'number') {
+            trackerState.ducat.byCharacter[charId].runs[inst.id] = 0;
+        }
+    });
+    if (typeof trackerState.ducat.byCharacter[charId].totalDucats !== 'number') {
+        trackerState.ducat.byCharacter[charId].totalDucats = 0;
+    }
+}
+
+function normalizeState() {
+    if (!trackerState || typeof trackerState !== 'object') trackerState = createDefaultCoreState();
+    if (!trackerState.characters) trackerState.characters = createDefaultCoreState().characters;
+    if (!trackerState.characters.byId) trackerState.characters.byId = {};
+    if (!Array.isArray(trackerState.characters.order)) trackerState.characters.order = Object.keys(trackerState.characters.byId);
+    if (!trackerState.characters.activeCharacterId) trackerState.characters.activeCharacterId = trackerState.characters.order[0];
+    if (!trackerState.characters.nextCharId) trackerState.characters.nextCharId = 2;
+    if (!trackerState.ducat) trackerState.ducat = { byCharacter: {} };
+    if (!trackerState.ducat.byCharacter) trackerState.ducat.byCharacter = {};
+    if (!trackerState.tabSelections) trackerState.tabSelections = { apsharanta: '', instances: '' };
+    if (typeof trackerState.tabSelections.apsharanta !== 'string') trackerState.tabSelections.apsharanta = '';
+    if (typeof trackerState.tabSelections.instances !== 'string') trackerState.tabSelections.instances = '';
+    if (!trackerState.customTabs) trackerState.customTabs = {};
+    if (!trackerState.fixedTabDataByCharacter) trackerState.fixedTabDataByCharacter = {};
+
+    if (trackerState.characters.order.length === 0) {
+        var fallbackId = 'char-1';
+        trackerState.characters.byId[fallbackId] = createDefaultCharacter(fallbackId, 'Character 1');
+        trackerState.characters.order = [fallbackId];
+        trackerState.characters.activeCharacterId = fallbackId;
+        if (trackerState.characters.nextCharId < 2) trackerState.characters.nextCharId = 2;
+    }
+
+    trackerState.characters.order = trackerState.characters.order.filter(function(charId) {
+        return trackerState.characters.byId[charId];
+    });
+    if (trackerState.characters.order.length === 0) {
+        trackerState.characters.order = Object.keys(trackerState.characters.byId);
+    }
+    trackerState.characters.order.forEach(function(charId) {
+        ensureCharacterDucatData(charId);
+    });
+
+    if (!trackerState.characters.byId[trackerState.characters.activeCharacterId]) {
+        trackerState.characters.activeCharacterId = trackerState.characters.order[0];
+    }
+    trackerState.version = STATE_VERSION;
+    rebuildTabsList();
+    if (!getFixedTabById(activeTab) && !trackerState.customTabs[activeTab]) {
+        activeTab = 'currency';
+    }
+}
+
+function migrateOldShape(saved) {
+    var migrated = createDefaultCoreState();
+    var oldState = saved && saved.tabData ? saved.tabData : {};
+    var oldDucat = oldState.ducat || {};
+    var oldChars = oldDucat.characters || {};
+    var oldCharIds = Object.keys(oldChars);
+
+    if (oldCharIds.length > 0) {
+        migrated.characters.byId = {};
+        migrated.characters.order = [];
+        migrated.ducat.byCharacter = {};
+        oldCharIds.forEach(function(charId) {
+            var oldChar = oldChars[charId] || {};
+            migrated.characters.byId[charId] = {
+                id: charId,
+                name: oldChar.name || charId,
+                classKey: isValidCharacterClass(oldChar.classKey) ? oldChar.classKey : 'gladiator'
+            };
+            migrated.characters.order.push(charId);
+            migrated.ducat.byCharacter[charId] = {
+                runs: getDefaultRunsMap(),
+                totalDucats: typeof oldChar.totalDucats === 'number' ? oldChar.totalDucats : 0
+            };
+            getDucatInstances().forEach(function(inst) {
+                var runVal = oldChar.runs && typeof oldChar.runs[inst.id] === 'number' ? oldChar.runs[inst.id] : 0;
+                migrated.ducat.byCharacter[charId].runs[inst.id] = runVal;
+            });
+        });
+        migrated.characters.activeCharacterId = oldDucat.activeCharacterId && migrated.characters.byId[oldDucat.activeCharacterId]
+            ? oldDucat.activeCharacterId
+            : migrated.characters.order[0];
+        migrated.characters.nextCharId = oldDucat.nextCharId || (migrated.characters.order.length + 1);
+    }
+
+    var oldTabs = saved && Array.isArray(saved.tabs) ? saved.tabs : [];
+    var customTabIds = oldTabs.filter(function(tabId) {
+        return tabId !== 'ducat' && !getFixedTabById(tabId);
+    });
+    customTabIds.forEach(function(tabId) {
+        var oldTab = oldState[tabId];
+        if (!oldTab || !Array.isArray(oldTab.fields)) return;
+        migrated.customTabs[tabId] = {
+            id: tabId,
+            name: oldTab.name || tabId,
+            isDefault: false,
+            fields: oldTab.fields.map(function(field) {
+                var values = {};
+                migrated.characters.order.forEach(function(charId) {
+                    values[charId] = field.value;
+                });
+                return {
+                    id: field.id || ('field-' + Date.now()),
+                    type: field.type || 'text',
+                    label: field.label || 'Field',
+                    maxValue: field.maxValue || null,
+                    options: Array.isArray(field.options) ? field.options : [],
+                    values: values
+                };
+            })
+        };
+    });
+
+    nextTabId = saved && saved.nextTabId ? saved.nextTabId : 1;
+    if (saved && saved.activeTab === 'ducat') activeTab = 'currency';
+    else activeTab = saved && saved.activeTab ? saved.activeTab : 'currency';
+
+    return migrated;
+}
+
 function saveTrackerState() {
     try {
         var data = {
+            version: STATE_VERSION,
             tabs: tabs,
             activeTab: activeTab,
             tabData: trackerState,
             nextTabId: nextTabId
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (e) { /* quota exceeded or private mode */ }
+    } catch (e) {}
 }
 
-// Load state from localStorage
 function loadTrackerState() {
     try {
         var raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) {
-            return false;
-        }
-        var data = JSON.parse(raw);
-        if (!data || !data.tabs || !Array.isArray(data.tabs)) {
-            return false;
-        }
+        if (!raw) return false;
+        var saved = JSON.parse(raw);
+        if (!saved || !saved.tabData) return false;
 
-        // Validate tabs array has at least ducat
-        if (data.tabs.indexOf('ducat') === -1) {
-            return false;
-        }
-
-        tabs = data.tabs;
-        activeTab = data.activeTab && data.tabs.indexOf(data.activeTab) !== -1 ? data.activeTab : 'ducat';
-        trackerState = data.tabData || {};
-        nextTabId = data.nextTabId || 1;
-
-        // Ensure ducat tab exists and is properly structured
-        if (!trackerState.ducat) {
-            trackerState.ducat = createDefaultDucatData();
+        if (!saved.version || saved.version < STATE_VERSION || saved.tabData.ducat && saved.tabData.ducat.characters) {
+            trackerState = migrateOldShape(saved);
         } else {
-            // Validate and migrate ducat data structure
-            var ducatData = trackerState.ducat;
-            
-            // Migrate old structure (runs at top level) to new character-based structure
-            if (ducatData.runs && !ducatData.characters) {
-                var oldRuns = ducatData.runs;
-                ducatData.characters = {};
-                ducatData.characters['char-1'] = createDefaultCharacterData('char-1', 'Character 1');
-                ducatData.characters['char-1'].runs = oldRuns;
-                ducatData.activeCharacterId = 'char-1';
-                ducatData.nextCharId = 2;
-                delete ducatData.runs;
-            }
-            
-            // Ensure characters object exists
-            if (!ducatData.characters || typeof ducatData.characters !== 'object') {
-                ducatData.characters = {};
-                ducatData.characters['char-1'] = createDefaultCharacterData('char-1', 'Character 1');
-            }
-            
-            // Ensure all characters have proper instance data
-            for (var charId in ducatData.characters) {
-                if (ducatData.characters.hasOwnProperty(charId)) {
-                    var char = ducatData.characters[charId];
-                    if (!char.runs || typeof char.runs !== 'object') {
-                        char.runs = {};
-                    }
-                    DUCAT_INSTANCES.forEach(function(inst) {
-                        if (typeof char.runs[inst.id] !== 'number') {
-                            char.runs[inst.id] = 0;
-                        }
-                    });
-                    // Ensure totalDucats exists
-                    if (typeof char.totalDucats !== 'number') {
-                        char.totalDucats = 0;
-                    }
-                    // Ensure classKey exists and is valid
-                    if (typeof char.classKey !== 'string' || !isValidCharacterClass(char.classKey)) {
-                        char.classKey = 'gladiator';
-                    }
-                }
-            }
-            
-            // Set active character if not set
-            if (!ducatData.activeCharacterId) {
-                ducatData.activeCharacterId = Object.keys(ducatData.characters)[0] || 'char-1';
-            }
-            
-            // Ensure nextCharId is set
-            if (!ducatData.nextCharId) {
-                var maxId = 1;
-                for (var id in ducatData.characters) {
-                    var match = id.match(/char-(\d+)/);
-                    if (match) {
-                        var num = parseInt(match[1]);
-                        if (num >= maxId) maxId = num + 1;
-                    }
-                }
-                ducatData.nextCharId = maxId;
-            }
+            trackerState = saved.tabData;
+            activeTab = saved.activeTab || 'currency';
+            nextTabId = saved.nextTabId || 1;
         }
-
+        normalizeState();
+        saveTrackerState();
         return true;
     } catch (e) {
         return false;
     }
 }
 
-// Initialize tracker - load existing or create new
 function initializeTracker() {
     if (!loadTrackerState()) {
-        // Create fresh state
-        trackerState.ducat = createDefaultDucatData();
-        tabs = ['ducat'];
-        activeTab = 'ducat';
+        trackerState = createDefaultCoreState();
+        activeTab = 'currency';
         nextTabId = 1;
+        normalizeState();
         saveTrackerState();
     }
 }
 
-// Add a new custom tab
+function createCustomTab(id, name) {
+    return { id: id, name: name, isDefault: false, fields: [] };
+}
+
 function addCustomTab(name) {
     var tabId = 'tab-' + (nextTabId++);
-    tabs.push(tabId);
-    trackerState[tabId] = createCustomTab(tabId, name);
+    trackerState.customTabs[tabId] = createCustomTab(tabId, name);
+    rebuildTabsList();
     activeTab = tabId;
     saveTrackerState();
     return tabId;
 }
 
-// Remove a custom tab
 function removeTab(tabId) {
-    if (tabId === 'ducat' || tabs.indexOf(tabId) === -1) return false;
-    var idx = tabs.indexOf(tabId);
-    if (idx !== -1) {
-        tabs.splice(idx, 1);
-        delete trackerState[tabId];
-        if (activeTab === tabId) {
-            activeTab = tabs[Math.max(0, idx - 1)];
-        }
-        saveTrackerState();
-        return true;
-    }
-    return false;
-}
-
-// Remove a field from custom tab
-function removeField(tabId, fieldIndex) {
-    var tab = trackerState[tabId];
-    if (!tab || tab.isDefault || fieldIndex >= tab.fields.length || fieldIndex < 0) return;
-    tab.fields.splice(fieldIndex, 1);
+    if (!trackerState.customTabs[tabId]) return false;
+    delete trackerState.customTabs[tabId];
+    rebuildTabsList();
+    if (!tabs.includes(activeTab)) activeTab = 'currency';
     saveTrackerState();
+    return true;
 }
 
-// Update ducat runs for specific character
-function setDucatRuns(instanceId, value, charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return;
-    var char = charId ? trackerState.ducat.characters[charId] : trackerState.ducat.characters[trackerState.ducat.activeCharacterId];
-    if (!char || !char.runs) return;
-    
-    var instance = DUCAT_INSTANCES.find(function(i) { return i.id === instanceId; });
-    if (!instance) return;
-
-    // Clamp value between 0 and maxRuns
-    value = Math.max(0, Math.min(parseInt(value) || 0, instance.maxRuns));
-    char.runs[instanceId] = value;
-    saveTrackerState();
+function getActiveCharacterId() {
+    return trackerState.characters.activeCharacterId;
 }
 
-// Get ducat runs for specific character
-function getDucatRuns(instanceId, charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return 0;
-    var char = charId ? trackerState.ducat.characters[charId] : trackerState.ducat.characters[trackerState.ducat.activeCharacterId];
-    if (!char || !char.runs) return 0;
-    return char.runs[instanceId] || 0;
+function getActiveCharacter() {
+    return trackerState.characters.byId[getActiveCharacterId()] || null;
 }
 
-// Reset all ducat runs for specific character
-function resetDucatRuns(charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return;
-    var char = charId ? trackerState.ducat.characters[charId] : trackerState.ducat.characters[trackerState.ducat.activeCharacterId];
-    if (!char || !char.runs) return;
-    DUCAT_INSTANCES.forEach(function(inst) {
-        char.runs[inst.id] = 0;
+function getAllCharacters() {
+    return trackerState.characters.order.map(function(charId) {
+        return trackerState.characters.byId[charId];
     });
-    saveTrackerState();
 }
 
-// Reset all ducat runs for ALL characters (maintenance reset)
-function resetAllCharacterRuns() {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return;
-    for (var charId in trackerState.ducat.characters) {
-        if (trackerState.ducat.characters.hasOwnProperty(charId)) {
-            DUCAT_INSTANCES.forEach(function(inst) {
-                trackerState.ducat.characters[charId].runs[inst.id] = 0;
-            });
-        }
-    }
-    saveTrackerState();
-}
-
-// Set total ducats for specific character
-function setTotalDucats(value, charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return;
-    var char = charId ? trackerState.ducat.characters[charId] : trackerState.ducat.characters[trackerState.ducat.activeCharacterId];
-    if (!char) return;
-    
-    // Clamp value between 0 and 1000
-    value = Math.max(0, Math.min(parseInt(value) || 0, 1000));
-    char.totalDucats = value;
-    saveTrackerState();
-}
-
-// Get total ducats for specific character
-function getTotalDucats(charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return 0;
-    var char = charId ? trackerState.ducat.characters[charId] : trackerState.ducat.characters[trackerState.ducat.activeCharacterId];
-    if (!char) return 0;
-    return char.totalDucats || 0;
-}
-
-// Add a new character
 function addCharacter(charName) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return null;
-    if (Object.keys(trackerState.ducat.characters).length >= 10) {
-        return null; // Max 10 characters
-    }
-    var charId = 'char-' + (trackerState.ducat.nextCharId++);
-    trackerState.ducat.characters[charId] = createDefaultCharacterData(charId, charName);
+    if (trackerState.characters.order.length >= 10) return null;
+    var charId = 'char-' + (trackerState.characters.nextCharId++);
+    trackerState.characters.byId[charId] = createDefaultCharacter(charId, charName);
+    trackerState.characters.order.push(charId);
+    ensureCharacterDucatData(charId);
+    Object.keys(trackerState.customTabs).forEach(function(tabId) {
+        trackerState.customTabs[tabId].fields.forEach(function(field) {
+            if (!field.values) field.values = {};
+            field.values[charId] = getDefaultFieldValue(field.type);
+        });
+    });
     saveTrackerState();
     return charId;
 }
 
-// Remove a character
 function removeCharacter(charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return false;
-    if (Object.keys(trackerState.ducat.characters).length <= 1) return false; // Keep at least one
-    if (!trackerState.ducat.characters[charId]) return false;
-    
-    delete trackerState.ducat.characters[charId];
-    
-    // Switch to another character if this was active
-    if (trackerState.ducat.activeCharacterId === charId) {
-        var firstCharId = Object.keys(trackerState.ducat.characters)[0];
-        trackerState.ducat.activeCharacterId = firstCharId;
+    if (!trackerState.characters.byId[charId]) return false;
+    if (trackerState.characters.order.length <= 1) return false;
+    delete trackerState.characters.byId[charId];
+    delete trackerState.ducat.byCharacter[charId];
+    trackerState.characters.order = trackerState.characters.order.filter(function(id) { return id !== charId; });
+    Object.keys(trackerState.customTabs).forEach(function(tabId) {
+        trackerState.customTabs[tabId].fields.forEach(function(field) {
+            if (field.values) delete field.values[charId];
+        });
+    });
+    if (trackerState.characters.activeCharacterId === charId) {
+        trackerState.characters.activeCharacterId = trackerState.characters.order[0];
     }
-    
     saveTrackerState();
     return true;
 }
 
-// Switch active character
 function switchCharacter(charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return false;
-    if (!trackerState.ducat.characters[charId]) return false;
-    
-    trackerState.ducat.activeCharacterId = charId;
+    if (!trackerState.characters.byId[charId]) return false;
+    trackerState.characters.activeCharacterId = charId;
     saveTrackerState();
     return true;
 }
 
-// Rename a character
 function renameCharacter(charId, newName) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return false;
-    if (!trackerState.ducat.characters[charId]) return false;
-    
-    trackerState.ducat.characters[charId].name = newName;
+    if (!trackerState.characters.byId[charId]) return false;
+    trackerState.characters.byId[charId].name = newName;
     saveTrackerState();
     return true;
 }
 
 function getCharacterClassKeys() {
-    if (typeof CLASS_ORDER !== 'undefined' && Array.isArray(CLASS_ORDER) && CLASS_ORDER.length > 0) {
-        return CLASS_ORDER.slice();
-    }
-    if (typeof CLASS_DATA !== 'undefined' && CLASS_DATA && typeof CLASS_DATA === 'object') {
-        return Object.keys(CLASS_DATA);
-    }
+    if (typeof CLASS_ORDER !== 'undefined' && Array.isArray(CLASS_ORDER) && CLASS_ORDER.length > 0) return CLASS_ORDER.slice();
+    if (typeof CLASS_DATA !== 'undefined' && CLASS_DATA && typeof CLASS_DATA === 'object') return Object.keys(CLASS_DATA);
     return ['gladiator'];
 }
 
@@ -322,150 +351,174 @@ function isValidCharacterClass(classKey) {
 }
 
 function getCharacterClass(charId) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return 'gladiator';
-    var char = trackerState.ducat.characters[charId] || trackerState.ducat.characters[trackerState.ducat.activeCharacterId];
+    var char = trackerState.characters.byId[charId] || getActiveCharacter();
     if (!char || !isValidCharacterClass(char.classKey)) return 'gladiator';
     return char.classKey;
 }
 
 function setCharacterClass(charId, classKey) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return false;
-    if (!trackerState.ducat.characters[charId]) return false;
+    if (!trackerState.characters.byId[charId]) return false;
     if (!isValidCharacterClass(classKey)) return false;
-
-    trackerState.ducat.characters[charId].classKey = classKey;
+    trackerState.characters.byId[charId].classKey = classKey;
     saveTrackerState();
     return true;
 }
 
-// Get active character
-function getActiveCharacter() {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return null;
-    return trackerState.ducat.characters[trackerState.ducat.activeCharacterId] || null;
+function getDucatRuns(instanceId, charId) {
+    var targetChar = charId || getActiveCharacterId();
+    ensureCharacterDucatData(targetChar);
+    return trackerState.ducat.byCharacter[targetChar].runs[instanceId] || 0;
 }
 
-// Get all characters
-function getAllCharacters() {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return [];
-    return Object.keys(trackerState.ducat.characters).map(function(charId) {
-        return trackerState.ducat.characters[charId];
-    });
-}
-
-// Get tab data
-function getTabData(tabId) {
-    return trackerState[tabId] || null;
-}
-
-// Update custom tab field
-function updateCustomField(tabId, fieldIndex, value) {
-    var tab = trackerState[tabId];
-    if (!tab || tab.isDefault || fieldIndex >= tab.fields.length) return;
-    
-    var field = tab.fields[fieldIndex];
-    
-    // For number fields with maxValue, clamp the value
-    if (field.type === 'number' && field.maxValue) {
-        var numValue = parseInt(value) || 0;
-        value = Math.max(0, Math.min(numValue, field.maxValue));
-    }
-    
-    field.value = value;
+function setDucatRuns(instanceId, value, charId) {
+    var instance = getDucatInstances().find(function(i) { return i.id === instanceId; });
+    if (!instance) return;
+    var targetChar = charId || getActiveCharacterId();
+    ensureCharacterDucatData(targetChar);
+    var clamped = Math.max(0, Math.min(parseInt(value, 10) || 0, instance.maxRuns));
+    trackerState.ducat.byCharacter[targetChar].runs[instanceId] = clamped;
     saveTrackerState();
 }
 
-// Add field to custom tab
+function resetDucatRuns(charId) {
+    var targetChar = charId || getActiveCharacterId();
+    ensureCharacterDucatData(targetChar);
+    getDucatInstances().forEach(function(inst) {
+        trackerState.ducat.byCharacter[targetChar].runs[inst.id] = 0;
+    });
+    saveTrackerState();
+}
+
+function resetAllCharacterRuns() {
+    trackerState.characters.order.forEach(function(charId) {
+        resetDucatRuns(charId);
+    });
+    saveTrackerState();
+}
+
+function getTotalDucats(charId) {
+    var targetChar = charId || getActiveCharacterId();
+    ensureCharacterDucatData(targetChar);
+    return trackerState.ducat.byCharacter[targetChar].totalDucats || 0;
+}
+
+function setTotalDucats(value, charId) {
+    var targetChar = charId || getActiveCharacterId();
+    ensureCharacterDucatData(targetChar);
+    trackerState.ducat.byCharacter[targetChar].totalDucats = Math.max(0, Math.min(parseInt(value, 10) || 0, 1000));
+    saveTrackerState();
+}
+
+function getTabData(tabId) {
+    if (getFixedTabById(tabId)) {
+        return getFixedTabById(tabId);
+    }
+    return trackerState.customTabs[tabId] || null;
+}
+
+function getDefaultFieldValue(fieldType) {
+    if (fieldType === 'checkbox') return false;
+    if (fieldType === 'checklist') return {};
+    return '';
+}
+
 function addFieldToTab(tabId, fieldType, fieldLabel, maxValue, options) {
-    var tab = trackerState[tabId];
-    if (!tab || tab.isDefault) return;
-
-    var defaultValue = '';
-    if (fieldType === 'checkbox') defaultValue = false;
-    else if (fieldType === 'checklist') defaultValue = {};
-
+    var tab = trackerState.customTabs[tabId];
+    if (!tab) return;
     var field = {
         id: 'field-' + Date.now(),
-        type: fieldType, // 'text', 'number', 'dropdown', 'checkbox', 'checklist', 'note'
+        type: fieldType,
         label: fieldLabel,
-        value: defaultValue,
         maxValue: maxValue || null,
-        options: options || []
+        options: options || [],
+        values: {}
     };
-
+    trackerState.characters.order.forEach(function(charId) {
+        field.values[charId] = getDefaultFieldValue(fieldType);
+    });
     tab.fields.push(field);
     saveTrackerState();
 }
 
-// Toggle a checkbox field
-function toggleCheckboxField(tabId, fieldIndex) {
-    var tab = trackerState[tabId];
-    if (!tab || tab.isDefault || fieldIndex < 0 || fieldIndex >= tab.fields.length) return;
-    tab.fields[fieldIndex].value = !tab.fields[fieldIndex].value;
+function removeField(tabId, fieldIndex) {
+    var tab = trackerState.customTabs[tabId];
+    if (!tab || fieldIndex < 0 || fieldIndex >= tab.fields.length) return;
+    tab.fields.splice(fieldIndex, 1);
     saveTrackerState();
 }
 
-// Toggle one item in a checklist field
-function toggleChecklistItem(tabId, fieldIndex, optionKey) {
-    var tab = trackerState[tabId];
-    if (!tab || tab.isDefault || fieldIndex < 0 || fieldIndex >= tab.fields.length) return;
+function getCustomFieldValue(field, charId) {
+    var targetChar = charId || getActiveCharacterId();
+    if (!field.values) field.values = {};
+    if (field.values[targetChar] === undefined) field.values[targetChar] = getDefaultFieldValue(field.type);
+    return field.values[targetChar];
+}
+
+function updateCustomField(tabId, fieldIndex, value) {
+    var tab = trackerState.customTabs[tabId];
+    if (!tab || fieldIndex >= tab.fields.length) return;
     var field = tab.fields[fieldIndex];
-    if (!field.value || typeof field.value !== 'object') field.value = {};
-    field.value[optionKey] = !field.value[optionKey];
+    if (!field.values) field.values = {};
+    if (field.type === 'number' && field.maxValue) {
+        var num = parseInt(value, 10) || 0;
+        value = Math.max(0, Math.min(num, field.maxValue));
+    }
+    field.values[getActiveCharacterId()] = value;
     saveTrackerState();
 }
 
-// Update field properties (for max value or options)
+function toggleCheckboxField(tabId, fieldIndex) {
+    var tab = trackerState.customTabs[tabId];
+    if (!tab || fieldIndex < 0 || fieldIndex >= tab.fields.length) return;
+    var field = tab.fields[fieldIndex];
+    field.values[getActiveCharacterId()] = !getCustomFieldValue(field);
+    saveTrackerState();
+}
+
+function toggleChecklistItem(tabId, fieldIndex, optionKey) {
+    var tab = trackerState.customTabs[tabId];
+    if (!tab || fieldIndex < 0 || fieldIndex >= tab.fields.length) return;
+    var field = tab.fields[fieldIndex];
+    var current = getCustomFieldValue(field);
+    if (!current || typeof current !== 'object') current = {};
+    current[optionKey] = !current[optionKey];
+    field.values[getActiveCharacterId()] = current;
+    saveTrackerState();
+}
+
 function updateFieldProperties(tabId, fieldIndex, properties) {
-    var tab = trackerState[tabId];
-    if (!tab || tab.isDefault || fieldIndex >= tab.fields.length) return;
-    
+    var tab = trackerState.customTabs[tabId];
+    if (!tab || fieldIndex >= tab.fields.length) return;
     var field = tab.fields[fieldIndex];
     if (properties.maxValue !== undefined) field.maxValue = properties.maxValue;
     if (properties.options !== undefined) field.options = properties.options;
-    
     saveTrackerState();
 }
 
-// Reorder characters in ducat
 function reorderCharacters(fromIndex, toIndex) {
-    if (!trackerState.ducat || !trackerState.ducat.characters) return;
-    
-    var charIds = Object.keys(trackerState.ducat.characters);
-    if (fromIndex < 0 || fromIndex >= charIds.length || toIndex < 0 || toIndex >= charIds.length) return;
-    
-    // Get the character ID to move
-    var charId = charIds[fromIndex];
-    
-    // Remove from old position
-    charIds.splice(fromIndex, 1);
-    
-    // Insert at new position
-    charIds.splice(toIndex, 0, charId);
-    
-    // Rebuild the characters object in new order
-    var newCharacters = {};
-    charIds.forEach(function(id) {
-        newCharacters[id] = trackerState.ducat.characters[id];
-    });
-    trackerState.ducat.characters = newCharacters;
-    
+    var order = trackerState.characters.order;
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= order.length || toIndex >= order.length) return;
+    var moved = order[fromIndex];
+    order.splice(fromIndex, 1);
+    order.splice(toIndex, 0, moved);
     saveTrackerState();
 }
 
-// Reorder fields in custom tab
 function reorderFields(tabId, fromIndex, toIndex) {
-    var tab = trackerState[tabId];
-    if (!tab || !tab.fields || fromIndex < 0 || fromIndex >= tab.fields.length) return;
-    if (toIndex < 0 || toIndex >= tab.fields.length) return;
-    
-    // Get the field to move
-    var field = tab.fields[fromIndex];
-    
-    // Remove from old position
+    var tab = trackerState.customTabs[tabId];
+    if (!tab || fromIndex < 0 || toIndex < 0 || fromIndex >= tab.fields.length || toIndex >= tab.fields.length) return;
+    var moved = tab.fields[fromIndex];
     tab.fields.splice(fromIndex, 1);
-    
-    // Insert at new position
-    tab.fields.splice(toIndex, 0, field);
-    
+    tab.fields.splice(toIndex, 0, moved);
     saveTrackerState();
+}
+
+function setTabSubcategory(tabId, subcategoryId) {
+    if (!trackerState.tabSelections.hasOwnProperty(tabId)) return;
+    trackerState.tabSelections[tabId] = subcategoryId || '';
+    saveTrackerState();
+}
+
+function getTabSubcategory(tabId) {
+    return trackerState.tabSelections[tabId] || '';
 }

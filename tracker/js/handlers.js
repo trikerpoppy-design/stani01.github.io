@@ -387,10 +387,7 @@ function processModalAction(value) {
                     setCharacterClass(charId, classValueInput.value);
                 }
                 switchCharacter(charId);
-                renderDucatTab(
-                    document.getElementById('tracker-content'),
-                    trackerState.ducat
-                );
+                renderActiveTabContent();
                 TK.closeModal();
             } else {
                 showModalError('Maximum 10 characters allowed');
@@ -400,10 +397,7 @@ function processModalAction(value) {
         case 'rename-character':
             if (value && value !== modalState.currentValue) {
                 renameCharacter(modalState.charId, value);
-                renderDucatTab(
-                    document.getElementById('tracker-content'),
-                    trackerState.ducat
-                );
+                renderActiveTabContent();
                 TK.closeModal();
             } else {
                 TK.closeModal();
@@ -428,10 +422,7 @@ function processModalAction(value) {
         
         case 'confirm-remove-char':
             removeCharacter(modalState.charId);
-            renderDucatTab(
-                document.getElementById('tracker-content'),
-                trackerState.ducat
-            );
+            renderActiveTabContent();
             TK.closeModal();
             break;
         
@@ -443,10 +434,7 @@ function processModalAction(value) {
         
         case 'confirm-reset-ducat':
             resetDucatRuns();
-            renderDucatTab(
-                document.getElementById('tracker-content'),
-                trackerState.ducat
-            );
+            renderActiveTabContent();
             TK.closeModal();
             break;
 
@@ -566,10 +554,7 @@ window.TK = {
     // Switch to a character
     switchCharacter: function(charId) {
         switchCharacter(charId);
-        renderDucatTab(
-            document.getElementById('tracker-content'),
-            trackerState.ducat
-        );
+        renderActiveTabContent();
     },
 
     // Select class in Add Character modal (second click clears selection)
@@ -669,7 +654,7 @@ window.TK = {
 
         showModal(
             'Add Character',
-            'Character ' + (Object.keys(trackerState.ducat.characters).length + 1),
+            'Character ' + (getAllCharacters().length + 1),
             '',
             'add-character',
             null,
@@ -681,7 +666,7 @@ window.TK = {
 
     // Remove a character
     removeCharacter: function(charId) {
-        var char = trackerState.ducat.characters[charId];
+        var char = trackerState.characters.byId[charId];
         if (!char) return;
         modalState.charId = charId;
         showModal(
@@ -697,7 +682,7 @@ window.TK = {
 
     // Rename a character (double-click handler)
     openRenameCharDialog: function(charId) {
-        var char = trackerState.ducat.characters[charId];
+        var char = trackerState.characters.byId[charId];
         if (!char) return;
         
         showModal(
@@ -733,10 +718,7 @@ window.TK = {
     // Set class from inline icon menu
     selectCharacterClass: function(charId, classKey) {
         if (!setCharacterClass(charId, classKey)) return;
-        renderDucatTab(
-            document.getElementById('tracker-content'),
-            trackerState.ducat
-        );
+        renderActiveTabContent();
         TK.closeClassMenus();
     },
 
@@ -847,10 +829,7 @@ window.TK = {
             var fromIndex = parseInt(dragState.draggedElement.getAttribute('data-char-index'));
             var toIndex = parseInt(dragState.draggedOverElement.getAttribute('data-char-index'));
             reorderCharacters(fromIndex, toIndex);
-            renderDucatTab(
-                document.getElementById('tracker-content'),
-                trackerState.ducat
-            );
+            renderActiveTabContent();
         }
     },
 
@@ -904,10 +883,7 @@ window.TK = {
     // Reset all instance runs for ALL characters (maintenance reset)
     resetAllRuns: function() {
         resetAllCharacterRuns();
-        renderDucatTab(
-            document.getElementById('tracker-content'),
-            trackerState.ducat
-        );
+        renderActiveTabContent();
     },
 
     // Reset total ducats for the active character
@@ -950,7 +926,7 @@ window.TK = {
             reader.onload = function(evt) {
                 try {
                     var data = JSON.parse(evt.target.result);
-                    if (!data || !Array.isArray(data.tabs) || data.tabs.indexOf('ducat') === -1) {
+                    if (!data || !Array.isArray(data.tabs)) {
                         showModal('Import Failed', '', 'Invalid configuration file.', null, null, null, 'alert');
                         return;
                     }
@@ -969,6 +945,34 @@ window.TK = {
             reader.readAsText(file);
         };
         fileInput.click();
+    },
+
+    selectSubcategory: function(tabId, subcategoryId) {
+        setTabSubcategory(tabId, subcategoryId);
+        renderActiveTabContent();
+    },
+
+    clearSubcategory: function(tabId) {
+        setTabSubcategory(tabId, '');
+        renderActiveTabContent();
+    },
+
+    getSubcategoryLabel: function(tabId, subcategoryId) {
+        var labels = {
+            instances: {
+                'group-hard-normal': 'Group Instances (hard - normal)',
+                'group-easy-normal': 'Group Instances (easy + normal)',
+                solo: 'Solo Instances'
+            },
+            apsharanta: {
+                heavenly: 'Heavenly',
+                sundew: 'Sundew',
+                nightshade: 'Nightshade',
+                ancient: 'Ancient'
+            }
+        };
+        if (!labels[tabId] || !labels[tabId][subcategoryId]) return subcategoryId;
+        return labels[tabId][subcategoryId];
     }
 };
 

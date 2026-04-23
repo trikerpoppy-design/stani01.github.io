@@ -178,11 +178,62 @@ var WEAPON_SETS = [
     { key: 'vision',          name: 'Vision' }
 ];
 
+// Weapon set levels used for fuse eligibility.
+// Rule: for 2H fuse, off-hand set level cannot be higher than main-hand set level.
+var WEAPON_SET_LEVELS = {
+    'acrimony': 80,
+    'presumption': 80,
+    'jorgoth-t3-v1': 80,
+    'jorgoth-t3-v2': 80,
+    'jorgoth-t3-v3': 80,
+    'jorgoth-t4-v1': 81,
+    'jorgoth-t4-v2': 81,
+    'jorgoth-t4-v3': 81,
+    'fighting-spirit': 81,
+    'salvation': 83,
+    'spiked': 80,
+    'ciclonica-helper': 80,
+    'vision': 80,
+    'none': 0
+};
+
 // Sets that are main-hand exclusive (not available for off-hand/fuse)
 var OFFHAND_EXCLUDED_SETS = ['acrimony', 'presumption', 'vision'];
 
 // Sets available only for off-hand/fuse (not main-hand)
 var MAINHAND_EXCLUDED_SETS = ['jorgoth-t3-v1', 'jorgoth-t3-v2', 'jorgoth-t3-v3'];
+
+function getWeaponSetLevel(setKey) {
+    return WEAPON_SET_LEVELS[setKey] || 0;
+}
+
+function isOffHandSetAllowed(mainSetKey, offHandSetKey, mainType, offHandType) {
+    if (!offHandSetKey || WEAPON_SET_KEYS.indexOf(offHandSetKey) === -1) return false;
+    if (OFFHAND_EXCLUDED_SETS.indexOf(offHandSetKey) !== -1) return false;
+
+    var mainWeapon = WEAPON_TYPES[mainType];
+    var isFuse = offHandType === 'fuse';
+    if (!mainWeapon || !isFuse || !mainWeapon.twoHanded) return true;
+
+    var mainLv = getWeaponSetLevel(mainSetKey);
+    var offLv = getWeaponSetLevel(offHandSetKey);
+    if (!mainLv || !offLv) return true;
+    return offLv <= mainLv;
+}
+
+function getAllowedOffHandWeaponSets(mainSetKey, mainType, offHandType) {
+    return WEAPON_SETS.filter(function(ws) {
+        return isOffHandSetAllowed(mainSetKey, ws.key, mainType, offHandType);
+    });
+}
+
+function getDefaultOffHandSet(mainSetKey, mainType, offHandType) {
+    var allowedSets = getAllowedOffHandWeaponSets(mainSetKey, mainType, offHandType);
+    var preferred = allowedSets.find(function(ws) { return ws.key === 'fighting-spirit'; });
+    if (preferred) return preferred.key;
+    var firstReal = allowedSets.find(function(ws) { return ws.key !== 'none'; });
+    return firstReal ? firstReal.key : 'none';
+}
 
 var OATH_OPTIONS = [
     { key: 'none',         name: 'None',         rank: 0 },
